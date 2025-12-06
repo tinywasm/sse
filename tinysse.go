@@ -1,10 +1,12 @@
 package tinysse
 
-type TinySSE struct{}
+// TinySSE is the main struct for the library.
+type TinySSE struct {
+	config *Config
+	hub    *SSEHub // hub is server-side only
+}
 
-func New() *TinySSE {
-
-	t := &TinySSE{}
-
-	return t
+// Broadcast sends a message to the specified channels.
+func (s *TinySSE) Broadcast(data []byte, broadcast []string, handlerID uint8) {
+	s.hub.Broadcast(data, broadcast, handlerID)
 }

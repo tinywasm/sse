@@ -18,9 +18,9 @@ run_tests() {
   # Test con coverage en un solo comando
   rc=0
   if [ -n "$prefix" ]; then
-    eval "$prefix go test -coverprofile=$cov ./tinysse/... $tags" > "$out" 2>&1 || rc=$?
+    eval "$prefix go test -coverprofile=$cov ./... $tags" > "$out" 2>&1 || rc=$?
   else
-    go test -coverprofile="$cov" ./tinysse/... $tags > "$out" 2>&1 || rc=$?
+    go test -coverprofile="$cov" ./... $tags > "$out" 2>&1 || rc=$?
   fi
   
   if [ $rc -ne 0 ]; then
