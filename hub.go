@@ -3,107 +3,200 @@
 package tinysse
 
 import (
-	"strconv"
+	"bytes"
+	"strings"
 	"sync"
+
+	"github.com/cdvelop/tinystring"
 )
 
-// SSEHub manages SSE clients and broadcasting.
-type SSEHub struct {
-	mu            sync.RWMutex
-	clients       map[string]*clientConnection
-	messageBuffer []SSEMessage
-	config        *Config
-	lastID        uint64
+// hub manages SSE clients and broadcasting.
+type hub struct {
+	tinySSE *tinySSE
+	config  *ServerConfig
+
+	// Registered clients.
+	clients map[*clientConnection]bool
+
+	// Inbound messages from the clients.
+	broadcast chan *broadcastMessage
+
+	// Register requests from the clients.
+	register chan registerRequest
+
+	// Unregister requests from clients.
+	unregister chan *clientConnection
+
+	// History buffer
+	history      []*historyItem
+	historyMutex sync.RWMutex
+	lastID       int
 }
 
-// NewHub creates a new SSEHub.
-func NewHub(c *Config) *SSEHub {
-	return &SSEHub{
-		clients: make(map[string]*clientConnection),
-		config:  c,
-	}
+type registerRequest struct {
+	client      *clientConnection
+	lastEventID string
 }
 
-// Broadcast sends a message to the specified channels.
-func (h *SSEHub) Broadcast(data []byte, broadcast []string, handlerID uint8) {
-	h.mu.Lock()
-	h.lastID++
-	msg := SSEMessage{
-		ID:        strconv.FormatUint(h.lastID, 10),
-		Data:      data,
-		Targets:   broadcast,
-		HandlerID: handlerID,
+type broadcastMessage struct {
+	msg      *SSEMessage
+	channels []string
+}
+
+type historyItem struct {
+	msg      *SSEMessage
+	channels []string
+}
+
+// clientConnection represents a connected SSE client on the server side.
+type clientConnection struct {
+	channels []string
+	send     chan []byte
+}
+
+func newHub(t *tinySSE, c *ServerConfig) *hub {
+	h := &hub{
+		tinySSE:    t,
+		config:     c,
+		broadcast:  make(chan *broadcastMessage),
+		register:   make(chan registerRequest),
+		unregister: make(chan *clientConnection),
+		clients:    make(map[*clientConnection]bool),
+		history:    make([]*historyItem, 0, c.HistoryReplayBuffer),
 	}
-	h.messageBuffer = append(h.messageBuffer, msg)
+	go h.run()
+	return h
+}
 
-	// Trim buffer if it's too large
-	if h.config.HistoryReplayBuffer > 0 && len(h.messageBuffer) > h.config.HistoryReplayBuffer {
-		h.messageBuffer = h.messageBuffer[len(h.messageBuffer)-h.config.HistoryReplayBuffer:]
-	}
-	h.mu.Unlock()
+func (h *hub) run() {
+	for {
+		select {
+		case req := <-h.register:
+			h.clients[req.client] = true
+			h.replayHistory(req.client, req.lastEventID)
 
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+		case client := <-h.unregister:
+			if _, ok := h.clients[client]; ok {
+				delete(h.clients, client)
+				close(client.send)
+			}
 
-	for _, client := range h.clients {
-		for _, target := range broadcast {
-			for _, channel := range client.Channels {
-				if target == channel {
-					client.Send <- msg
-					break
+		case bMsg := <-h.broadcast:
+			// 1. Assign ID
+			bMsg.msg.ID = h.nextID()
+
+			// 2. Add to history
+			h.addToHistory(bMsg.msg, bMsg.channels)
+
+			// 3. Format message once
+			formattedMsg := formatSSEMessage(bMsg.msg.ID, bMsg.msg.Event, bMsg.msg.Data)
+			dataBytes := []byte(formattedMsg)
+
+			// 4. Send to interested clients
+			for client := range h.clients {
+				if h.isSubscribed(client, bMsg.channels) {
+					select {
+					case client.send <- dataBytes:
+					default:
+						h.tinySSE.log("Dropping message for slow client")
+					}
 				}
 			}
 		}
 	}
 }
 
-// register adds a client to the hub.
-func (h *SSEHub) register(client *clientConnection) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.clients[client.ID] = client
+func (h *hub) nextID() string {
+	h.lastID++
+	return tinystring.Convert(h.lastID).String()
 }
 
-// unregister removes a client from the hub.
-func (h *SSEHub) unregister(client *clientConnection) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if _, ok := h.clients[client.ID]; ok {
-		delete(h.clients, client.ID)
-		close(client.Send)
+func (h *hub) addToHistory(msg *SSEMessage, channels []string) {
+	if h.config.HistoryReplayBuffer <= 0 {
+		return
+	}
+	h.historyMutex.Lock()
+	defer h.historyMutex.Unlock()
+
+	item := &historyItem{
+		msg:      msg,
+		channels: channels,
+	}
+
+	h.history = append(h.history, item)
+	if len(h.history) > h.config.HistoryReplayBuffer {
+		h.history = h.history[1:] // Remove oldest
 	}
 }
 
-// GetMessagesSince returns all messages since the given ID.
-func (h *SSEHub) GetMessagesSince(lastEventID string) []SSEMessage {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	if lastEventID == "" {
-		return nil
+func (h *hub) replayHistory(client *clientConnection, lastEventID string) {
+	if lastEventID == "" || h.config.HistoryReplayBuffer <= 0 {
+		return
 	}
-	lastID, err := strconv.ParseUint(lastEventID, 10, 64)
-	if err != nil {
-		return nil
-	}
-	var messages []SSEMessage
-	for _, msg := range h.messageBuffer {
-		msgID, err := strconv.ParseUint(msg.ID, 10, 64)
-		if err != nil {
-			continue
+
+	h.historyMutex.RLock()
+	defer h.historyMutex.RUnlock()
+
+	// Find where to start
+	startIndex := -1
+	for i, item := range h.history {
+		if item.msg.ID == lastEventID {
+			startIndex = i + 1
+			break
 		}
-		if msgID > lastID {
-			messages = append(messages, msg)
+	}
+
+	if startIndex != -1 && startIndex < len(h.history) {
+		for i := startIndex; i < len(h.history); i++ {
+			item := h.history[i]
+			// Check subscription for historical messages
+			if h.isSubscribed(client, item.channels) {
+				formattedMsg := formatSSEMessage(item.msg.ID, item.msg.Event, item.msg.Data)
+				client.send <- []byte(formattedMsg)
+			}
 		}
 	}
-	return messages
 }
 
-// clientConnection represents a connected SSE client on the server side.
-// Note: This is different from SSEClient which is the WASM client.
-type clientConnection struct {
-	ID       string
-	UserID   string
-	Role     string
-	Channels []string
-	Send     chan SSEMessage
+func (h *hub) isSubscribed(client *clientConnection, messageChannels []string) bool {
+	if len(messageChannels) == 0 {
+		return false
+	}
+
+	for _, msgChan := range messageChannels {
+		for _, clientChan := range client.channels {
+			if msgChan == clientChan {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// formatSSEMessage formats the SSE message according to spec.
+// Handles newlines by creating multiple data: lines.
+func formatSSEMessage(id, event string, data []byte) string {
+	var b strings.Builder
+	b.WriteString("id: ")
+	b.WriteString(id)
+	b.WriteString("\n")
+
+	if event != "" {
+		b.WriteString("event: ")
+		b.WriteString(event)
+		b.WriteString("\n")
+	}
+
+	// Split data by \n (also handles \r\n if we split by \n and trim \r)
+	lines := bytes.Split(data, []byte("\n"))
+	for _, line := range lines {
+		// Remove trailing \r if present
+		line = bytes.TrimSuffix(line, []byte("\r"))
+		b.WriteString("data: ")
+		b.Write(line)
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n") // End of message
+	return b.String()
 }

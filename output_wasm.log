@@ -1,0 +1,5 @@
+# github.com/cdvelop/tinysse
+package github.com/cdvelop/tinysse
+	imports syscall/js: build constraints exclude all Go files in /home/jules/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.2.linux-amd64/src/syscall/js
+FAIL	github.com/cdvelop/tinysse [setup failed]
+FAIL

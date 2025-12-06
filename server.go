@@ -3,136 +3,115 @@
 package tinysse
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"io"
 	"net/http"
-
-	"github.com/cdvelop/tinystring"
 )
 
-// ServeHTTP implements the http.Handler interface.
-func (s *TinySSE) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Set headers for SSE
-	origin := r.Header.Get("Origin")
-	if len(s.config.AllowedOrigins) > 0 {
-		allowed := false
-		for _, o := range s.config.AllowedOrigins {
-			if o == "*" || o == origin {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			err := &SSEError{Type: tinystring.Msg.Auth, Err: http.ErrNoCookie, Context: "origin not allowed"}
-			if s.config.OnError != nil {
-				s.config.OnError(err)
-			}
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
+// SSEServer handles Server-Sent Events HTTP connections.
+type SSEServer struct {
+	tinySSE *tinySSE
+	config  *ServerConfig
+	hub     *hub
+}
+
+// Server creates a new SSEServer instance.
+func (t *tinySSE) Server(c *ServerConfig) *SSEServer {
+	return &SSEServer{
+		tinySSE: t,
+		config:  c,
+		hub:     newHub(t, c),
 	}
-	w.Header().Set("Access-Control-Allow-Origin", origin)
+}
+
+// ServeHTTP implements the http.Handler interface.
+func (s *SSEServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 1. Resolve channels
+	var channels []string
+	var err error
+
+	if s.config.ChannelProvider != nil {
+		channels, err = s.config.ChannelProvider.ResolveChannels(r)
+	} else {
+		// Default behavior: reject if no provider configured
+		http.Error(w, "channel provider not configured", http.StatusInternalServerError)
+		return
+	}
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	// 2. Set headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
+	// 3. Register client
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		err := &SSEError{Type: tinystring.Msg.Connect, Err: http.ErrNotSupported, Context: "streaming unsupported"}
-		if s.config.OnError != nil {
-			s.config.OnError(err)
-		}
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
 
-	// Extract token and validate
-	token := r.URL.Query().Get("token")
-	userID, role, err := s.config.TokenValidator(token)
-	if err != nil {
-		err := &SSEError{Type: tinystring.Msg.Auth, Err: err, Context: "token validation failed"}
-		if s.config.OnError != nil {
-			s.config.OnError(err)
-		}
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
-	}
-
-	// Replay missed messages
-	lastEventID := r.Header.Get("Last-Event-ID")
-	if lastEventID != "" {
-		messages := s.hub.GetMessagesSince(lastEventID)
-		for _, msg := range messages {
-			io.WriteString(w, tinystring.Fmt("id: %s\ndata: %s\n\n", msg.ID, msg.Data))
-		}
-		flusher.Flush()
-	}
-
-	// Create and register a new client
-	clientID, err := randomHex(16)
-	if err != nil {
-		err := &SSEError{Type: tinystring.Msg.Connect, Err: err, Context: "client ID generation failed"}
-		if s.config.OnError != nil {
-			s.config.OnError(err)
-		}
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-	client := &clientConnection{
-		ID:       clientID,
-		UserID:   userID,
-		Role:     role,
-		Channels: autoChannels(userID, role),
-		Send:     make(chan SSEMessage, s.config.ClientChannelBuffer),
-	}
-	s.hub.register(client)
-
-	// Unregister client on disconnect
-	defer s.hub.unregister(client)
-
-	// Notify on connect
-	if s.config.OnConnect != nil {
-		s.config.OnConnect(client.ID)
-	}
-
-	// Flush headers to establish connection immediately
+	// Flush headers immediately so client knows connection is open
+	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	// Notify on disconnect
-	if s.config.OnDisconnect != nil {
-		defer s.config.OnDisconnect(client.ID)
+	// Create client connection
+	client := &clientConnection{
+		channels: channels,
+		send:     make(chan []byte, s.config.ClientChannelBuffer),
 	}
 
-	// Send messages to the client
-	ctx := r.Context()
+	// Handle Last-Event-ID for replay
+	lastEventID := r.Header.Get("Last-Event-ID")
+
+	s.hub.register <- registerRequest{
+		client:      client,
+		lastEventID: lastEventID,
+	}
+
+	// Ensure unregister on exit
+	defer func() {
+		s.hub.unregister <- client
+	}()
+
+	// 4. Loop to send messages
 	for {
 		select {
-		case <-ctx.Done():
-			return
-		case msg, ok := <-client.Send:
+		case msg, ok := <-client.send:
 			if !ok {
 				return
 			}
-			io.WriteString(w, tinystring.Fmt("id: %s\ndata: %s\n\n", msg.ID, msg.Data))
+			_, err := w.Write(msg)
+			if err != nil {
+				return
+			}
 			flusher.Flush()
+		case <-r.Context().Done():
+			return
 		}
 	}
 }
 
-// autoChannels generates the default channels for a user.
-func autoChannels(userID, role string) []string {
-	return []string{
-		"all",
-		"role:" + role,
-		"user:" + userID,
+// Publish implements SSEPublisher.Publish
+func (s *SSEServer) Publish(data []byte, channels ...string) {
+	s.hub.broadcast <- &broadcastMessage{
+		msg: &SSEMessage{
+			Event: "", // Default
+			Data:  data,
+		},
+		channels: channels,
 	}
 }
 
-func randomHex(n int) (string, error) {
-	bytes := make([]byte, n)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
+// PublishEvent implements SSEPublisher.PublishEvent
+func (s *SSEServer) PublishEvent(event string, data []byte, channels ...string) {
+	s.hub.broadcast <- &broadcastMessage{
+		msg: &SSEMessage{
+			Event: event,
+			Data:  data,
+		},
+		channels: channels,
 	}
-	return hex.EncodeToString(bytes), nil
 }
