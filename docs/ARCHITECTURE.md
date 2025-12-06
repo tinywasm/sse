@@ -143,7 +143,3 @@ flowchart TB
 | **Protocol** | SSE Standard | `data: ...\n\n` required for browser compatibility. |
 | **Auth** | Query Token | Compatible with EventSource API. |
 | **Errors** | MessageType | Reuse properties of `tinystring.MessageType`. |
-
----
-
-[← Back to Implementation Plan](./SSE_IMPLEMENTATION.md)
