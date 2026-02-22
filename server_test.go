@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -121,11 +122,17 @@ func TestServerHistoryReplay(t *testing.T) {
 	req = req.WithContext(ctx)
 
 	// Run handler in goroutine
-	go server.ServeHTTP(w, req)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		server.ServeHTTP(w, req)
+	}()
 
 	// Allow some time for replay
 	time.Sleep(50 * time.Millisecond)
-	cancel() // Stop server handler
+	cancel()  // Stop server handler
+	wg.Wait() // Wait for handler to completely exit before reading body
 
 	output := w.Body.String()
 

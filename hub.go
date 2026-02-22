@@ -172,30 +172,26 @@ func (h *hub) isSubscribed(client *clientConnection, messageChannels []string) b
 	return false
 }
 
-// formatSSEMessage formats the SSE message according to spec.
-// Handles newlines by creating multiple data: lines.
 func formatSSEMessage(id, event string, data []byte) string {
-	b := Convert()
-	b.Write("id: ")
-	b.Write(id)
-	b.Write("\n")
+	var b bytes.Buffer
+	b.WriteString("id: ")
+	b.WriteString(id)
+	b.WriteString("\n")
 
 	if event != "" {
-		b.Write("event: ")
-		b.Write(event)
-		b.Write("\n")
+		b.WriteString("event: ")
+		b.WriteString(event)
+		b.WriteString("\n")
 	}
 
-	// Split data by \n (also handles \r\n if we split by \n and trim \r)
 	lines := bytes.Split(data, []byte("\n"))
 	for _, line := range lines {
-		// Remove trailing \r if present
 		line = bytes.TrimSuffix(line, []byte("\r"))
-		b.Write("data: ")
+		b.WriteString("data: ")
 		b.Write(line)
-		b.Write("\n")
+		b.WriteString("\n")
 	}
 
-	b.Write("\n") // End of message
+	b.WriteString("\n")
 	return b.String()
 }
