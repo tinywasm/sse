@@ -129,14 +129,30 @@ func (h *hub) addToHistory(msg *SSEMessage, channels []string) {
 }
 
 func (h *hub) replayHistory(client *clientConnection, lastEventID string) {
-	if lastEventID == "" || h.config.HistoryReplayBuffer <= 0 {
+	if h.config.HistoryReplayBuffer <= 0 {
+		return
+	}
+
+	// No Last-Event-ID: replay all history if ReplayAllOnConnect is enabled
+	if lastEventID == "" {
+		if !h.config.ReplayAllOnConnect {
+			return
+		}
+		h.historyMutex.RLock()
+		defer h.historyMutex.RUnlock()
+		for _, item := range h.history {
+			if h.isSubscribed(client, item.channels) {
+				formattedMsg := formatSSEMessage(item.msg.ID, item.msg.Event, item.msg.Data)
+				client.send <- []byte(formattedMsg)
+			}
+		}
 		return
 	}
 
 	h.historyMutex.RLock()
 	defer h.historyMutex.RUnlock()
 
-	// Find where to start
+	// Find where to start (after the last known event ID)
 	startIndex := -1
 	for i, item := range h.history {
 		if item.msg.ID == lastEventID {
@@ -148,7 +164,6 @@ func (h *hub) replayHistory(client *clientConnection, lastEventID string) {
 	if startIndex != -1 && startIndex < len(h.history) {
 		for i := startIndex; i < len(h.history); i++ {
 			item := h.history[i]
-			// Check subscription for historical messages
 			if h.isSubscribed(client, item.channels) {
 				formattedMsg := formatSSEMessage(item.msg.ID, item.msg.Event, item.msg.Data)
 				client.send <- []byte(formattedMsg)

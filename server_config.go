@@ -12,6 +12,11 @@ type ServerConfig struct {
 	// Recommended: Depends on message frequency.
 	HistoryReplayBuffer int
 
+	// ReplayAllOnConnect replays the full history buffer to every new client
+	// on first connect (when no Last-Event-ID is provided).
+	// Useful for log viewers where clients may connect after events are published.
+	ReplayAllOnConnect bool
+
 	// ChannelProvider resolves channels for each SSE connection.
 	// If nil, a default provider is used that rejects all connections
 	// with error "channel provider not configured".
