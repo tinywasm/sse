@@ -94,14 +94,14 @@ func (s *SSEServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Publish implements SSEPublisher.Publish
-func (s *SSEServer) Publish(data []byte, channels ...string) {
+// Publish sends data to a single channel
+func (s *SSEServer) Publish(data []byte, channel string) {
 	s.hub.broadcast <- &broadcastMessage{
 		msg: &SSEMessage{
 			Event: "", // Default
 			Data:  data,
 		},
-		channels: channels,
+		channels: []string{channel},
 	}
 }
 
