@@ -4,7 +4,6 @@ package sse
 
 import (
 	"github.com/tinywasm/model"
-	"github.com/tinywasm/orm"
 )
 
 func (m *SSEMessage) ModelName() string {
@@ -12,7 +11,7 @@ func (m *SSEMessage) ModelName() string {
 }
 
 var _schemaSSEMessage = []model.Field{
-		{Name: "id", Type: model.FieldText, DB: &model.FieldDB{PK: true}},
+		{Name: "id", Type: model.FieldText},
 		{Name: "event", Type: model.FieldText},
 		{Name: "data", Type: model.FieldBlob},
 	}
@@ -45,21 +44,4 @@ func (s *SSEMessageList) Append() model.Fielder  { v := &SSEMessage{}; *s = appe
 func (s *SSEMessageList) IsNil() bool          { return s == nil }
 func (s *SSEMessageList) EncodeFields(_ model.FieldWriter) {}
 func (s *SSEMessageList) DecodeFields(_ model.FieldReader) {}
-
-func ReadOneSSEMessage(qb *orm.QB, model *SSEMessage) (*SSEMessage, error) {
-	err := qb.ReadOne()
-	if err != nil {
-		return nil, err
-	}
-	return model, nil
-}
-
-func ReadAllSSEMessage(qb *orm.QB) (*SSEMessageList, error) {
-	var results SSEMessageList
-	err := qb.ReadAll(
-		func() model.Model { return &SSEMessage{} },
-		func(m model.Model) { results = append(results, m.(*SSEMessage)) },
-	)
-	return &results, err
-}
 
