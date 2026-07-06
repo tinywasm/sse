@@ -3,7 +3,7 @@
 package sse
 
 import (
-	"github.com/tinywasm/fmt"
+	"github.com/tinywasm/model"
 	"github.com/tinywasm/orm"
 )
 
@@ -11,25 +11,25 @@ func (m *SSEMessage) ModelName() string {
 	return "ssemessage"
 }
 
-var _schemaSSEMessage = []fmt.Field{
-		{Name: "id", Type: fmt.FieldText, DB: &fmt.FieldDB{PK: true}},
-		{Name: "event", Type: fmt.FieldText},
-		{Name: "data", Type: fmt.FieldBlob},
+var _schemaSSEMessage = []model.Field{
+		{Name: "id", Type: model.FieldText, DB: &model.FieldDB{PK: true}},
+		{Name: "event", Type: model.FieldText},
+		{Name: "data", Type: model.FieldBlob},
 	}
 
-func (m *SSEMessage) Schema() []fmt.Field { return _schemaSSEMessage }
+func (m *SSEMessage) Schema() []model.Field { return _schemaSSEMessage }
 
 func (m *SSEMessage) Pointers() []any { return []any{&m.ID, &m.Event, &m.Data} }
 
 func (m *SSEMessage) IsNil() bool { return m == nil }
 
-func (m *SSEMessage) EncodeFields(w fmt.FieldWriter) {
+func (m *SSEMessage) EncodeFields(w model.FieldWriter) {
 	w.String("id", m.ID)
 	w.String("event", m.Event)
 	w.Bytes("data", m.Data)
 }
 
-func (m *SSEMessage) DecodeFields(r fmt.FieldReader) {
+func (m *SSEMessage) DecodeFields(r model.FieldReader) {
 	if v, ok := r.String("id"); ok { m.ID = v }
 	if v, ok := r.String("event"); ok { m.Event = v }
 	if v, ok := r.Bytes("data"); ok { m.Data = v }
@@ -37,14 +37,14 @@ func (m *SSEMessage) DecodeFields(r fmt.FieldReader) {
 
 type SSEMessageList []*SSEMessage
 
-func (s *SSEMessageList) Schema() []fmt.Field { return nil }
+func (s *SSEMessageList) Schema() []model.Field { return nil }
 func (s *SSEMessageList) Pointers() []any     { return nil }
 func (s *SSEMessageList) Len() int             { return len(*s) }
-func (s *SSEMessageList) At(i int) fmt.Fielder { return (*s)[i] }
-func (s *SSEMessageList) Append() fmt.Fielder  { v := &SSEMessage{}; *s = append(*s, v); return v }
+func (s *SSEMessageList) At(i int) model.Fielder { return (*s)[i] }
+func (s *SSEMessageList) Append() model.Fielder  { v := &SSEMessage{}; *s = append(*s, v); return v }
 func (s *SSEMessageList) IsNil() bool          { return s == nil }
-func (s *SSEMessageList) EncodeFields(_ fmt.FieldWriter) {}
-func (s *SSEMessageList) DecodeFields(_ fmt.FieldReader) {}
+func (s *SSEMessageList) EncodeFields(_ model.FieldWriter) {}
+func (s *SSEMessageList) DecodeFields(_ model.FieldReader) {}
 
 func ReadOneSSEMessage(qb *orm.QB, model *SSEMessage) (*SSEMessage, error) {
 	err := qb.ReadOne()
@@ -57,8 +57,8 @@ func ReadOneSSEMessage(qb *orm.QB, model *SSEMessage) (*SSEMessage, error) {
 func ReadAllSSEMessage(qb *orm.QB) (*SSEMessageList, error) {
 	var results SSEMessageList
 	err := qb.ReadAll(
-		func() fmt.Model { return &SSEMessage{} },
-		func(m fmt.Model) { results = append(results, m.(*SSEMessage)) },
+		func() model.Model { return &SSEMessage{} },
+		func(m model.Model) { results = append(results, m.(*SSEMessage)) },
 	)
 	return &results, err
 }
