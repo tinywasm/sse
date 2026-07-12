@@ -16,7 +16,8 @@ This document outlines the core architectural decisions behind `tinysse`.
 | Decision | Description | Reason |
 | :--- | :--- | :--- |
 | **Server-Only Hub** | The `Hub` logic resides only on the server (`!wasm`). | Reduces WASM binary size; the client only needs a single connection. |
-| **ChannelProvider** | An interface (`ChannelProvider`) resolves channels from `http.Request`. | Decouples the library from any specific authentication or session system (like `crudp`). |
+| **ChannelProvider** | An interface (`ChannelProvider`) resolves channels from a `router.Context`. | Decouples the library from any specific authentication or session system (like `crudp`), and from `net/http`. |
+| **`router` streaming contract** | The server exposes `StreamHandler() router.StreamFunc` and is mounted with `r.Stream(path, ...)`. It never implements `http.Handler` nor asserts `http.Flusher`. | A handler registered as streaming *receives* a `Streamer` (a `Context` that can `Flush()`), so the capability is guaranteed by the compiler instead of checked at runtime — an illegal state (streaming over a non-flushable transport) becomes unrepresentable. It also makes streaming isomorphic: no `net/http` on the public surface. |
 | **Raw Data Delivery** | `SSEMessage.Data` is `[]byte`. | Avoids forced `encoding/json` import in the library. |
 | **Hybrid Reconnection** | Uses browser native reconnection for network drops, but supports manual configuration for retry strategies. | Balances reliability and control. |
 | **Implicit Broadcasting** | Broadcasting is done to "channels" (strings). | Simple and flexible. A "user" is just a channel named `user:ID`. |

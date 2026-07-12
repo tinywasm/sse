@@ -1,9 +1,12 @@
 package sse
 
-// SSEMessage represents a message sent over SSE.
-// Shared by both Server (for broadcasting) and Client (for consumption).
-type SSEMessage struct {
-	ID    string // SSE "id:" field - Required. Used for Last-Event-ID reconnection.
-	Event string // SSE "event:" field - Optional. Allows routing to different handlers.
-	Data  []byte // SSE "data:" field - RAW bytes, library does NOT parse.
+import "github.com/tinywasm/model"
+
+var SSEMessageModel = model.Definition{
+	Name: "ssemessage",
+	Fields: []model.Field{
+		{Name: "id", Type: model.Text()},
+		{Name: "event", Type: model.Text()},
+		{Name: "data", Type: model.Blob()},
+	},
 }

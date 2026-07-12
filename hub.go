@@ -82,13 +82,13 @@ func (h *hub) run() {
 
 		case bMsg := <-h.broadcast:
 			// 1. Assign ID
-			bMsg.msg.ID = h.nextID()
+			bMsg.msg.Id = h.nextID()
 
 			// 2. Add to history
 			h.addToHistory(bMsg.msg, bMsg.channels)
 
 			// 3. Format message once
-			formattedMsg := formatSSEMessage(bMsg.msg.ID, bMsg.msg.Event, bMsg.msg.Data)
+			formattedMsg := formatSSEMessage(bMsg.msg.Id, bMsg.msg.Event, bMsg.msg.Data)
 			dataBytes := []byte(formattedMsg)
 
 			// 4. Send to interested clients
@@ -142,7 +142,7 @@ func (h *hub) replayHistory(client *clientConnection, lastEventID string) {
 		defer h.historyMutex.RUnlock()
 		for _, item := range h.history {
 			if h.isSubscribed(client, item.channels) {
-				formattedMsg := formatSSEMessage(item.msg.ID, item.msg.Event, item.msg.Data)
+				formattedMsg := formatSSEMessage(item.msg.Id, item.msg.Event, item.msg.Data)
 				client.send <- []byte(formattedMsg)
 			}
 		}
@@ -155,7 +155,7 @@ func (h *hub) replayHistory(client *clientConnection, lastEventID string) {
 	// Find where to start (after the last known event ID)
 	startIndex := -1
 	for i, item := range h.history {
-		if item.msg.ID == lastEventID {
+		if item.msg.Id == lastEventID {
 			startIndex = i + 1
 			break
 		}
@@ -165,7 +165,7 @@ func (h *hub) replayHistory(client *clientConnection, lastEventID string) {
 		for i := startIndex; i < len(h.history); i++ {
 			item := h.history[i]
 			if h.isSubscribed(client, item.channels) {
-				formattedMsg := formatSSEMessage(item.msg.ID, item.msg.Event, item.msg.Data)
+				formattedMsg := formatSSEMessage(item.msg.Id, item.msg.Event, item.msg.Data)
 				client.send <- []byte(formattedMsg)
 			}
 		}

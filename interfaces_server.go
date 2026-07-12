@@ -1,8 +1,6 @@
-//go:build !wasm
-
 package sse
 
-import "net/http"
+import "github.com/tinywasm/router"
 
 // ChannelProvider resolves SSE channels for a connection.
 // Implemented by external packages (e.g., crudp session handler).
@@ -11,12 +9,12 @@ type ChannelProvider interface {
 	// Called once when client connects.
 	//
 	// Parameters:
-	//   - r: The HTTP request (contains cookies, headers, query params)
+	//   - ctx: The router context (contains headers, path, cookies)
 	//
 	// Returns:
 	//   - channels: List of channels to subscribe (e.g., ["all", "user:123", "role:admin"])
 	//   - err: If non-nil, connection is rejected with 401/403
-	ResolveChannels(r *http.Request) (channels []string, err error)
+	ResolveChannels(ctx router.Context) (channels []string, err error)
 }
 
 // SSEPublisher allows publishing messages to SSE clients.

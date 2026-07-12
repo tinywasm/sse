@@ -94,7 +94,7 @@ func TestClientOnMessage(t *testing.T) {
 	}
 
 	verifyMessage(t, received, "test-event", []byte("hello world"))
-	if received.ID != "123" {
-		t.Errorf("expected ID '123', got %s", received.ID)
+	if received.Id != "123" {
+		t.Errorf("expected ID '123', got %s", received.Id)
 	}
 }

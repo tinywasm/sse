@@ -1,8 +1,6 @@
-//go:build !wasm
-
 package sse
 
-// ServerConfig holds configuration strictly for the Server HTTP Handler.
+// ServerConfig holds configuration strictly for the SSE stream handler.
 type ServerConfig struct {
 	// ClientChannelBuffer prevents blocking on slow clients.
 	// Recommended: 10-100.

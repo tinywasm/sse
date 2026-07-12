@@ -114,7 +114,7 @@ flowchart TB
     end
     
     subgraph ServerOnly["//go:build !wasm"]
-        SERVER["server.go\nHTTP Handler"]
+        SERVER["server.go\nrouter.StreamFunc"]
         HUB["hub.go\nSSEHub Logic"]
         CLIENT["client.go\nSSEClient Struct"]
     end

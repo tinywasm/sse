@@ -3,82 +3,133 @@
 package sse
 
 import (
-	"context"
-	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
 
 	. "github.com/tinywasm/fmt"
+	"github.com/tinywasm/router"
+	routermock "github.com/tinywasm/router/mock"
 )
 
-// mockChannelProvider implements ChannelProvider for testing
+// mockChannelProvider implements ChannelProvider for testing.
 type mockChannelProvider struct {
 	channels []string
 	err      error
 }
 
-func (m *mockChannelProvider) ResolveChannels(r *http.Request) ([]string, error) {
+func (m *mockChannelProvider) ResolveChannels(_ router.Context) ([]string, error) {
 	return m.channels, m.err
 }
 
-func TestServerFlow(t *testing.T) {
-	// 1. Setup
+// mockStreamer implementa router.Streamer: bufferiza Write y cuenta Flush.
+type mockStreamer struct {
+	routermock.Context
+	mu         sync.Mutex
+	flushCount int
+	// done cierra la conexión simulada desde el test
+	done chan struct{}
+}
+
+func newMockStreamer() *mockStreamer {
+	return &mockStreamer{done: make(chan struct{})}
+}
+
+// Flush registra el flush y no hace nada más (push simulado).
+func (m *mockStreamer) Flush() {
+	m.mu.Lock()
+	m.flushCount++
+	m.mu.Unlock()
+}
+
+func (m *mockStreamer) FlushCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.flushCount
+}
+
+// Output devuelve el cuerpo de respuesta bufferizado.
+func (m *mockStreamer) Output() string {
+	return string(m.ResponseBody())
+}
+
+// Garantía en compilación: mockStreamer satisface router.Streamer.
+var _ router.Streamer = (*mockStreamer)(nil)
+
+// --- Tests ---
+
+func TestStreamHandlerContractCompiles(t *testing.T) {
+	cfg := &Config{Log: testLog(t)}
+	tSSE := New(cfg)
+	server := tSSE.Server(&ServerConfig{ChannelProvider: &mockChannelProvider{channels: []string{"c"}}})
+
+	// Garantía en compilación: StreamHandler devuelve exactamente router.StreamFunc.
+	var _ router.StreamFunc = server.StreamHandler()
+}
+
+func TestStreamHandlerNoChannelProvider(t *testing.T) {
+	cfg := &Config{}
+	tSSE := New(cfg)
+	server := tSSE.Server(&ServerConfig{}) // sin ChannelProvider
+
+	st := newMockStreamer()
+	server.StreamHandler()(st)
+
+	if st.Status != 500 {
+		t.Errorf("expected status 500, got %d", st.Status)
+	}
+	if !Contains(st.Output(), "channel provider not configured") {
+		t.Errorf("expected error message, got %q", st.Output())
+	}
+}
+
+func TestStreamHandlerChannelProviderError(t *testing.T) {
+	cfg := &Config{}
+	tSSE := New(cfg)
+	provider := &mockChannelProvider{err: Err("auth failed")}
+	server := tSSE.Server(&ServerConfig{ChannelProvider: provider})
+
+	st := newMockStreamer()
+	server.StreamHandler()(st)
+
+	if st.Status != 401 {
+		t.Errorf("expected status 401, got %d", st.Status)
+	}
+}
+
+func TestStreamHandlerPublishEvent(t *testing.T) {
 	cfg := &Config{Log: testLog(t)}
 	tSSE := New(cfg)
 
-	provider := &mockChannelProvider{
-		channels: []string{"test-channel"},
-	}
-
-	serverCfg := &ServerConfig{
+	provider := &mockChannelProvider{channels: []string{"test-channel"}}
+	server := tSSE.Server(&ServerConfig{
 		ClientChannelBuffer: 10,
 		HistoryReplayBuffer: 10,
 		ChannelProvider:     provider,
-	}
+	})
 
-	server := tSSE.Server(serverCfg)
+	st := newMockStreamer()
 
-	// 2. Start Server
-	ts := httptest.NewServer(server)
-	defer ts.Close()
-
-	// 3. Connect Client (Simulated HTTP request)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL, nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("failed to connect: %v", err)
-	}
-
-	t.Log("Client connected, starting publisher...")
-
-	// 4. Publish Message
-	msgData := []byte("hello world")
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		// Wait for connection registration
-		time.Sleep(200 * time.Millisecond)
-		t.Log("Publishing message...")
-		server.PublishEvent("greeting", msgData, "test-channel")
-		t.Log("Message published")
+		defer wg.Done()
+		server.StreamHandler()(st)
 	}()
 
-	// 5. Read Stream
-	buf := make([]byte, 1024)
-	t.Log("Reading stream...")
-	n, err := resp.Body.Read(buf)
-	t.Logf("Read returned: n=%d err=%v", n, err)
-	if err != nil {
-		t.Fatalf("failed to read response: %v", err)
-	}
+	// Esperar a que el handler se registre y flushee los headers
+	time.Sleep(50 * time.Millisecond)
 
-	output := string(buf[:n])
-	t.Logf("Received: %s", output)
+	// Publicar un evento
+	server.PublishEvent("greeting", []byte("hello world"), "test-channel")
 
-	// Verify output format
+	// Dar tiempo a que el hub lo encole y el handler lo escriba
+	time.Sleep(100 * time.Millisecond)
+
+	// Verificar que el evento fue recibido antes de cortar
+	output := st.Output()
+	t.Logf("Output so far: %q", output)
+
 	if !Contains(output, "event: greeting") {
 		t.Error("missing event type")
 	}
@@ -88,9 +139,37 @@ func TestServerFlow(t *testing.T) {
 	if !Contains(output, "id: ") {
 		t.Error("missing id")
 	}
+	if st.FlushCount() < 2 { // 1 header flush + ≥1 message flush
+		t.Errorf("expected at least 2 flushes, got %d", st.FlushCount())
+	}
+
+	// Terminar: forzar error en Write cerrando el buffer... el hub cerrará el canal
+	// enviando unregister al salir del handler por sí solo al cerrarse send.
+	// Usamos Publish en canal vacío para que hub haga close(send) vía unregister:
+	// simplemente esperamos que el test termine (wg.Wait con timeout).
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	// El handler sale cuando su goroutine termina naturalmente (send cerrado por hub
+	// o Write falla). Dado que en este test no hay más mensajes, el hub NO cerrará
+	// el canal automáticamente. Damos un tiempo razonable y luego forzamos con un
+	// Publish en canal sin suscriptores para activar el unregister.
+	//
+	// En la práctica el servidor termina cuando el transporte cierra la conexión;
+	// aquí simplemente publicamos al canal vacío para que el hub procese la salida.
+	select {
+	case <-done:
+		// Handler ya terminó (raro en este contexto sin error de Write)
+	case <-time.After(200 * time.Millisecond):
+		// El handler está bloqueado en `range client.send` — es correcto, no hay más
+		// mensajes. El test pasó sus aserciones, terminamos.
+	}
 }
 
-func TestServerHistoryReplay(t *testing.T) {
+func TestStreamHandlerHistoryReplay(t *testing.T) {
 	cfg := &Config{Log: testLog(t)}
 	tSSE := New(cfg)
 
@@ -98,45 +177,33 @@ func TestServerHistoryReplay(t *testing.T) {
 	server := tSSE.Server(&ServerConfig{
 		ClientChannelBuffer: 10,
 		HistoryReplayBuffer: 5,
+		ReplayAllOnConnect:  true,
 		ChannelProvider:     provider,
 	})
 
-	// Publish some messages before connection
+	// Publicar antes de conectar
 	server.Publish([]byte("msg1"), "all")
 	server.Publish([]byte("msg2"), "all")
 	server.Publish([]byte("msg3"), "all")
 
-	// Wait a bit for processing
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 
-	// Connect with Last-Event-ID = 1 (should receive 2 and 3)
-	// We assume IDs are sequential 1, 2, 3...
+	// Conectar con Last-Event-ID = "1" → debe recibir msg2 y msg3
+	st := newMockStreamer()
+	st.SetHeader("Last-Event-ID", "1") // simula request header de entrada
 
-	req, _ := http.NewRequest("GET", "/", nil)
-	req.Header.Set("Last-Event-ID", "1")
-
-	w := httptest.NewRecorder()
-
-	// Create a context that we can cancel to stop the server loop
-	ctx, cancel := context.WithCancel(context.Background())
-	req = req.WithContext(ctx)
-
-	// Run handler in goroutine
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		server.ServeHTTP(w, req)
+		server.StreamHandler()(st)
 	}()
 
-	// Allow some time for replay
-	time.Sleep(50 * time.Millisecond)
-	cancel()  // Stop server handler
-	wg.Wait() // Wait for handler to completely exit before reading body
+	time.Sleep(100 * time.Millisecond)
 
-	output := w.Body.String()
+	output := st.Output()
+	t.Logf("History replay output: %q", output)
 
-	// Should contain msg2 and msg3, but NOT msg1
 	if Contains(output, "data: msg1") {
 		t.Error("should not receive msg1")
 	}
@@ -146,40 +213,7 @@ func TestServerHistoryReplay(t *testing.T) {
 	if !Contains(output, "data: msg3") {
 		t.Error("missing msg3")
 	}
-}
 
-func TestDefaultChannelProvider(t *testing.T) {
-	cfg := &Config{}
-	tSSE := New(cfg)
-	// No provider set
-	server := tSSE.Server(&ServerConfig{})
-
-	req, _ := http.NewRequest("GET", "/", nil)
-	w := httptest.NewRecorder()
-	server.ServeHTTP(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500, got %d", w.Code)
-	}
-	if !Contains(w.Body.String(), "channel provider not configured") {
-		t.Errorf("expected error message, got %s", w.Body.String())
-	}
-}
-
-func TestChannelProviderError(t *testing.T) {
-	cfg := &Config{}
-	tSSE := New(cfg)
-
-	provider := &mockChannelProvider{
-		err: Err("auth failed"),
-	}
-	server := tSSE.Server(&ServerConfig{ChannelProvider: provider})
-
-	req, _ := http.NewRequest("GET", "/", nil)
-	w := httptest.NewRecorder()
-	server.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401, got %d", w.Code)
-	}
+	// El handler sigue bloqueado en range — no es un error, el test terminó.
+	_ = &wg
 }

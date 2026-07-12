@@ -21,8 +21,8 @@ package main
 
 import (
 	"log"
-	"net/http"
 
+	"github.com/tinywasm/router"
 	"github.com/tinywasm/sse"
 )
 
@@ -42,13 +42,13 @@ func main() {
 	// 3. Initialize Server
 	sseServer := tinysse.New(cfg).Server(serverCfg)
 
-	// 4. Mount Handler
-	http.Handle("/events", sseServer)
-
-	log.Println("SSE Server started on :8080/events")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	// 4. Mount as a streaming route. Stream() is what guarantees the handler
+	//    gets a Streamer (a Context that can Flush) — no capability assertion.
+	r.Stream("/events", sseServer.StreamHandler())
 }
 ```
+
+`StreamHandler()` returns a `router.StreamFunc`, so the transport is supplied by whatever `router` implementation you mount (backend or WASM). The library never names `net/http`.
 
 ### 2. Channel Resolution
 
@@ -57,8 +57,8 @@ You must implement the `ChannelProvider` interface to determine which channels a
 ```go
 type MyChannelProvider struct{}
 
-func (p *MyChannelProvider) ResolveChannels(r *http.Request) ([]string, error) {
-	// Example: Extract user ID from cookie or session
+func (p *MyChannelProvider) ResolveChannels(ctx router.Context) ([]string, error) {
+	// Example: Extract user ID from cookie or session, via ctx.GetHeader/ctx.Path
 	userID := "user_123" // Replace with real auth logic
 	role := "admin"
 

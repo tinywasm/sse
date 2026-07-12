@@ -73,7 +73,7 @@ func (c *SSEClient) Connect() {
 
 		if c.handler != nil {
 			msg := &SSEMessage{
-				ID:    eventID,
+				Id:    eventID,
 				Event: eventType,
 				Data:  []byte(dataStr), // Raw bytes from string
 			}
