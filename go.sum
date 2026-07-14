@@ -2,5 +2,5 @@ github.com/tinywasm/fmt v0.25.3 h1:CkyjeKvSFM8BxRWleb4gaPak8Fe+VKPWvnW0UU7KvQE=
 github.com/tinywasm/fmt v0.25.3/go.mod h1:L2GCAi6asgytPV6TVvGrRq5Ml+DkUt1Ijo5i/2J1jOY=
 github.com/tinywasm/model v0.0.12 h1:oKcZZ3VTzpffoAkeduz1QvQEY+cMQbLlhmzW3HvnEms=
 github.com/tinywasm/model v0.0.12/go.mod h1:wkYZLW6CWVrlx5TiLEBL71KgDxhjUcFtY3KXZKpkCXA=
-github.com/tinywasm/router v0.1.9 h1:vP0t5YBvXniecc2v2/Ff8PXsJ+fjmb5XTzHiMTACL/w=
-github.com/tinywasm/router v0.1.9/go.mod h1:F+o3tpVSeyH69MRhIssUPpZgxqIjNVUU8qxULWVtPhQ=
+github.com/tinywasm/router v0.1.10 h1:L+2q4p7kEcHX7RiWFYXcP0N3xKQ49JOcPGxIJomDCHE=
+github.com/tinywasm/router v0.1.10/go.mod h1:08QOKyfvojKOWqNDZN+HLeGB6aDB9Zkwq65YaMwx/QM=
