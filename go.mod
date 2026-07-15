@@ -6,6 +6,6 @@ require github.com/tinywasm/fmt v0.25.3
 
 require github.com/tinywasm/model v0.0.15
 
-require github.com/tinywasm/router v0.1.12
+require github.com/tinywasm/router v0.1.13
 
 require github.com/tinywasm/json v0.5.11 // indirect
