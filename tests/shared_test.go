@@ -1,6 +1,7 @@
-package sse
+package sse_test
 
 import (
+	. "github.com/tinywasm/sse"
 	"testing"
 )
 
