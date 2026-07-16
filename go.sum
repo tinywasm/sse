@@ -1,3 +1,5 @@
+github.com/tinywasm/events v0.0.2 h1:v9aQnj06ZGXcYVrkdAzDFXTYO5Dv4J8t13IBJNZVDg4=
+github.com/tinywasm/events v0.0.2/go.mod h1:ybWdxV/2Vjru9SmT0Oa7O07K/Y7KtxB3f7Z72wt50Ao=
 github.com/tinywasm/fmt v0.25.3 h1:CkyjeKvSFM8BxRWleb4gaPak8Fe+VKPWvnW0UU7KvQE=
 github.com/tinywasm/fmt v0.25.3/go.mod h1:L2GCAi6asgytPV6TVvGrRq5Ml+DkUt1Ijo5i/2J1jOY=
 github.com/tinywasm/json v0.5.11 h1:hG8RYmwtbxs4pC/i3EgQgsWe2C42LhUSA3i+YzPt818=
